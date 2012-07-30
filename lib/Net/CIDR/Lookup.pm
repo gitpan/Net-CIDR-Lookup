@@ -8,19 +8,13 @@ This class implements a lookup table indexed by IPv4 networks or hosts.
 
 =over 1
 
-=item *
-
-Addresses are accepted in numeric form (integer with separate netbits argument),
+=item * Addresses are accepted in numeric form (integer with separate netbits argument),
 as strings in CIDR notation or as IP address ranges
 
-=item *
-
-Overlapping or adjacent networks are automatically coalesced if their
+=item * Overlapping or adjacent networks are automatically coalesced if their
 associated values are equal.
 
-=item *
-
-The table is implemented as a binary tree so lookup and insertion take O(log n)
+=item * The table is implemented as a binary tree so lookup and insertion take O(log n)
 time.
 
 =back
@@ -78,6 +72,34 @@ latter case, an error message will be available in C<$Net::CIDR::Lookup::errstr>
   # 1.2.3.11/32 => 42
   # 1.2.4.192/27 => 42
 
+=head1 HISTORY
+
+=over 1
+
+=item v0.3 First CPAN release
+
+=item v0.3.1 
+
+=over 1
+
+=item * Replaced the simplistic list-based CIDR block splitting function with bit-fiddling for about a threefold speedup of C<add_num_range> and slightly less in C<add_range>.
+
+=item * Recursive merging-up up of blocks during C<add_*> works now. If e.g.
+you had a /24 and an adjacent /25 net with the same value before, adding a new
+/25 would have merged the new block with the existing /25, resulting in two
+adjacent /24s with the same value because only single-level merging was
+possible. Now the two will be merged to a single /23.
+
+=item * Removed some redundant tests and added new ones.
+
+=item * Removed some leftover debug code.
+
+=item * Some small fixes/improvements like stricter range checking in C<add_range>
+
+=back
+
+=back
+
 =head1 METHODS
 
 =cut
@@ -87,8 +109,8 @@ use strict;
 use warnings;
 use Carp;
 
-$Net::CIDR::Lookup::VERSION = sprintf "%d.%d", q$Revision: 0.3 $ =~ m/ (\d+) \. (\d+) /xg;
-$Net::CIDR::Lookup::errstr  = undef;
+our $VERSION = sprintf "%d.%d", q$Revision: 0.3.1$ =~ m/ (\d+) \. (\d+) /xg;
+our $errstr  = undef;
 
 =head2 new
 
@@ -97,6 +119,7 @@ Arguments: none
 Return Value: new object
 
 =cut
+
 sub new { bless [], shift }
 
 =head2 add
@@ -110,19 +133,20 @@ IPv4 address followed by a slash and a number of network bits. Bits to the
 right of this mask will be ignored.
 
 =cut
+
 sub add {
-	my ($self,$cidr,$val) = @_;
+	my ($self, $cidr, $val) = @_;
 
     unless(defined $val) {
         $__PACKAGE__::errstr = "can't store an undef";
-        return undef;
+        return;
     }
-	my ($net,$bits) = $cidr =~ m{ ^ ([.[:digit:]]+) / (\d+) $ }ox;
+	my ($net, $bits) = $cidr =~ m{ ^ ([.[:digit:]]+) / (\d+) $ }ox;
     unless(defined $net and defined $bits) {
         $__PACKAGE__::errstr = 'full dotted-quad/netbits notation required';
-        return undef;
+        return;
     }
-    my $intnet = _dq2int($net) or return undef;
+    my $intnet = _dq2int($net) or return;
 	$self->_add($intnet,$bits,$val);
 }
 
@@ -139,26 +163,28 @@ smaller the second. This range will be split up into as many CIDR blocks as
 necessary (algorithm adapted from a script by Dr. Liviu Daia).
 
 =cut
+
 sub add_range {
     my ($self, $range, $val) = @_;
 
     unless(defined $val) {
         $__PACKAGE__::errstr = "can't store an undef";
-        return undef;
+        return;
     }
 
     my ($ip_start, $ip_end, $crud) = split /\s*-\s*/, $range;
-    if(defined $crud) {
-        $__PACKAGE__::errstr = 'only one hyphen allowed in range';
-        return undef;
+    if(defined $crud or not defined $ip_end) {
+        $__PACKAGE__::errstr = 'must have exactly one hyphen in range';
+        return;
     }
 
-    $ip_start = _dq2int($ip_start) or return undef;
-    $ip_end   = _dq2int($ip_end)   or return undef;
-    # This check will be repeated in add_num_range but we'll get more readble errors here
+    $ip_start = _dq2int($ip_start) or return;
+    $ip_end   = _dq2int($ip_end)   or return;
+    # This check will be repeated in add_num_range but we get more readable
+    # errors here
     if($ip_start > $ip_end) {
         $__PACKAGE__::errstr = "start > end in range `$range'";
-        return undef;
+        return;
     }
 
     $self->add_num_range($ip_start, $ip_end, $val);
@@ -170,16 +196,18 @@ Arguments: C<$address>, C<$bits>, C<$value>
 
 Return Value: true for successful completion, C<undef> otherwise
 
-Like C<add()> but accepts address and bits as separate integer arguments instead
-of a string.
+Like C<add()> but accepts address and bits as separate integer arguments
+instead of a string.
 
 =cut
-sub add_num {
+
+sub add_num { ## no critic (Subroutines::RequireArgUnpacking)
     # my ($self,$ip,$bits,$val) = @_;
-	# Just call the recursive adder for now but allow for changes in object representation ($self != $n)
+	# Just call the recursive adder for now but allow for changes in object
+    # representation ($self != $n)
     unless(defined $_[3]) {
         $__PACKAGE__::errstr = "can't store an undef";
-        return undef;
+        return;
     }
 	_add(@_);
 }
@@ -194,18 +222,19 @@ Like C<add_range()> but accepts addresses as separate integer arguments instead
 of a range string.
 
 =cut
+
 sub add_num_range {
     my ($self, $start, $end, $val) = @_;
 
     if($start > $end) {
         $__PACKAGE__::errstr = "start > end in range $start--$end";
-        return undef;
+        return;
     }
 
     my @chunks;
-    _do_chunk(\@chunks, [ _int2bits($start) ], [ _int2bits($end) ]);
+    _do_chunk(\@chunks, $start, $end, 31, 0);
     foreach(@chunks) {
-        $self->add_num(@$_, $val) or return undef;   # Immediately fail on first problem
+        $self->add_num(@$_, $val) or return;   # Immediately fail on first problem
     }
     1;
 }
@@ -220,12 +249,13 @@ Looks up an address and returns the value associated with the network
 containing it. So far there is no way to tell which network that is though.
 
 =cut
+
 sub lookup {
 	my ($self, $addr) = @_;
 
     # Make sure there is no network spec tacked onto $addr
     $addr =~ s!/.*!!;
-	my $ip = _dq2int($addr) or return undef;
+	my $ip = _dq2int($addr) or return;
 	$self->_lookup($ip, 32);
 }
 
@@ -239,7 +269,8 @@ Return Value: value assoiated with this address or C<undef>
 Like C<lookup()> but accepts the address in integer form.
 
 =cut
-sub lookup_num { _lookup(@_, 32) }
+
+sub lookup_num { _lookup(@_, 32) } ## no critic (Subroutines::RequireArgUnpacking)
 
 =head2 dump
 
@@ -251,12 +282,11 @@ Returns a hash representation of the tree with keys being CIDR-style network
 addresses.
 
 =cut
-sub dump {
+
+sub dump {  ## no critic (Subroutines::ProhibitBuiltinHomonyms)
 	my ($self) = @_;
 	my %result;
 	$self->_walk(0, 0, sub {
-            my ($addr, $bits, $val) = @_;
-
             my $net = _int2dq($_[0]) . '/' . $_[1];
             if(defined $result{$net}) {
                 confess("internal error: network $net mapped to $result{$net} already!\n");
@@ -291,7 +321,8 @@ The value associated with this block
 Return Value: nothing useful
 
 =cut
-sub walk { $_[0]->_walk(0, 0, $_[1]) }
+
+sub walk { $_[0]->_walk(0, 0, $_[1]) } ## no critic (Subroutines::RequireArgUnpacking)
 
 
 =head2 clear
@@ -303,10 +334,10 @@ Return Value: nothing useful
 Remove all entries from the tree.
 
 =cut
+
 sub clear {
     my $self = shift;
-    undef $self->[0];
-    undef $self->[1];
+    undef @$self;
 }
 
 =head1 BUGS
@@ -323,6 +354,11 @@ complicated than anything this class does so far, so it's not implemented.
 Storing an C<undef> value does not work and yields an error. This would be
 relatively easy to fix at the cost of some memory so that's more a design
 decision.
+
+=item *
+
+Using a package-global for error reporting was an incredibly stupid idea
+initially. This will change in the next version.
 
 =item *
 
@@ -346,79 +382,91 @@ This module's methods are based loosely on those of C<Net::CIDR::Lite>
 # Walk through a subtree and insert a network
 sub _add {
 	my ($node, $addr, $nbits, $val) = @_;
-    my ($bit, $lastnode, $checksub);
+    my ($bit, $checksub);
+    my @node_stack;
 
+    DESCEND:
     while(1) {
 	    $bit = ($addr & 0x80000000) >> 31;
         $addr <<= 1;
 
         if(__PACKAGE__ ne ref $node) {
-            print STDERR "Subnet\n",return 1 if($val eq $node); # Compatible entry (tried to add a subnet of one already in the tree)
+            return 1 if($val eq $node); # Compatible entry (tried to add a subnet of one already in the tree)
             $__PACKAGE__::errstr = "incompatible entry, found `$node' trying to add `$val'";
-            return undef;
+            return;
         }
-        last unless(--$nbits);
+        last DESCEND unless --$nbits;
         if(defined $node->[$bit]) {
             $checksub = 1;
         } else {
             $node->[$bit] ||= bless([], __PACKAGE__);
             $checksub = 0;
         }
-        $lastnode = \$node->[$bit];
+        push @node_stack, \$node->[$bit];
         $node = $node->[$bit];
     }
-    $DB::single =1 if($::debug_now);
     
-    if($checksub and defined $node->[$bit] and __PACKAGE__ eq ref $node->[$bit]) {
-        eval {
-            $node->[$bit]->_walk(0, 0, sub {
-                    my $oldval = $_[2];
-                    $val == $oldval or die $oldval;
-                }
-            );
-        };
-        if($@) {
-            $__PACKAGE__::errstr = "incompatible entry, found `$@' trying to add `$val'";
-            return undef;
-        }
+    if($checksub and __PACKAGE__ eq ref $node->[$bit]) {
+        _add_check_subtree($node->[$bit], $val) or return;
     }
 
     $node->[$bit] = $val;
 
     # Take care of potential mergers into the previous node (if $node[0] == $node[1])
-    # TODO recursively check upwards
-    if(defined $node->[($bit + 1) % 2] and $node->[($bit + 1) % 2] eq $val) {
-        if(defined $lastnode) {
-            $$lastnode = $val;
-        } else {
-            $__PACKAGE__::errstr = 'merging two /1 blocks is not supported yet';
-            return undef;
-        }
+    if(not @node_stack and defined $node->[$bit ^ 1] and $node->[$bit ^ 1] eq $val) {
+        $__PACKAGE__::errstr = 'merging two /1 blocks is not supported yet';
+        return;
+    }
+    while(1) {
+        $node = pop @$node_stack // last;
+        last unless(defined $$node->[0] and defined $$node->[1] and $$node->[0] eq $$node->[1]);
+        $$node = $val;
     }
     1;
 }
 
-sub _lookup {
-	my ($n,$a,$restbits) = @_;
+# Check an existing subtree for incompatible values. Returns false and sets the
+# package-global error string if there was a problem.
+sub _add_check_subtree {
+    my ($root, $val) = @_;
 
-	my $bit = ($a & 0x80000000) >> 31;
-	defined $n->[$bit] or return undef;
-	__PACKAGE__ ne ref $n->[$bit] and return $n->[$bit];
-	_lookup($n->[$bit], $a << 1, $restbits - 1);
+    eval {
+        $root->_walk(0, 0, sub {
+                my $oldval = $_[2];
+                $val == $oldval or die $oldval; ## no critic (ErrorHandling::RequireCarping)
+            }
+        );
+        1;
+    } or do {
+        if($@) {
+            $__PACKAGE__::errstr = "incompatible entry, found `$@' trying to add `$val'";
+            return;
+        }
+    };
+    return 1;
+}
+
+sub _lookup {
+	my ($node, $addr) = @_;
+
+	my $bit = ($addr & 0x80000000) >> 31;
+	defined $node->[$bit] or return;
+	__PACKAGE__ ne ref $node->[$bit] and return $node->[$bit];
+	_lookup($node->[$bit], $addr << 1);
 }
 
 # Dotted-quad to integer
-sub _dq2int {
+sub _dq2int { ## no critic (Subroutines::RequireArgUnpacking)
 	my @oct = split /\./, $_[0];
 	unless(4 == @oct) {
         $__PACKAGE__::errstr = "address must be in dotted-quad form, is `$_[0]'";
-        return undef;
+        return;
     }
 	my $ip = 0;
     foreach(@oct) {
         if($_ > 255 or $_ < 0) {
             $__PACKAGE__::errstr = "invalid component `$_' in address `$_[0]'";
-            return undef;
+            return;
         }
         $ip = $ip<<8 | $_;
     }
@@ -426,13 +474,7 @@ sub _dq2int {
 }
 
 # Convert an IP address in integer format to dotted-quad
-sub _int2dq   { join '.', unpack 'C*', pack 'N', shift }
-
-# Convert an IP address in integer format to a big-endian list of bits
-sub _int2bits { split //, unpack 'B*', pack 'N', shift }
-
-# Convert a big-endian list of bits to an integer
-sub _bits2int { unpack 'N', pack 'B*', '0' x (32 - @_) . join('', @_) }
+sub _int2dq { join '.', unpack 'C*', pack 'N', shift }
 
 # Convert a CIDR block ($addr, $bits) into a range of addresses ($lo, $hi)
 # sub _cidr2rng { ( $_[0], $_[0] | ((1 << $_[1]) - 1) ) }
@@ -459,27 +501,26 @@ sub _walk {
 
 # Split a chunk into a minimal number of CIDR blocks.
 sub _do_chunk {
-  my ($chunks, $fbits, $lbits) = @_;
-  my (@prefix, $idx1, $idx2, $size);
+    my ($chunks, $start, $end, $ix1, $ix2) = @_;
+    my ($prefix, $xor);
 
-  # Find common prefix.  After that, next bit is 0 for $fbits and 1 for
-  # $lbits is 1.  A split a this point guarantees the longest suffix.
-  $idx1 = 0;
-  $idx1++ while ($idx1 <= $#$fbits and $$fbits[$idx1] eq $$lbits[$idx1]);
-  @prefix = @$fbits[0 .. $idx1 - 1];
+    # Find common prefix.  After that, the bit indicated by $ix1 is 0 for $start
+    # and 1 for $end. A split a this point guarantees the longest suffix.
+    $xor = $start ^ $end;
+    --$ix1 until($xor & 1 << $ix1 or -1 == $ix1);
+    $prefix = $start & ~((1 << ($ix1+1)) - 1);
 
-  $idx2 = $#$fbits;
-  $idx2-- while ($idx2 >= $idx1 and $$fbits[$idx2] eq '0' and $$lbits[$idx2] eq '1');
+    $ix2++ while($ix2 <= $ix1
+            and not ($start & 1 << $ix2)
+            and     ($end   & 1 << $ix2));
 
-  # Split if $fbits and $lbits disagree on the length of the chunk.
-  if ($idx2 >= $idx1) {
-    $size = $#$fbits - $idx1;
-    _do_chunk ($chunks, $fbits, [ @prefix, 0, (1) x $size ]        );
-    _do_chunk ($chunks,         [ @prefix, 1, (0) x $size ], $lbits);
-  } else {
-    $size = $#$fbits - $idx2;
-    push @$chunks, [ _bits2int(@prefix, (0) x $size), @$fbits - $size ];
-  }
+    # Split if $fbits and $lbits disagree on the length of the chunk.
+    if ($ix2 <= $ix1) {
+        _do_chunk($chunks, $start,              $prefix | ((1<<$ix1) - 1), $ix1, $ix2);
+        _do_chunk($chunks, $prefix | (1<<$ix1), $end,                      $ix1, $ix2);
+    } else {
+        push @$chunks, [ $prefix, 31-$ix1 ];
+    }
 }
 
 1;
