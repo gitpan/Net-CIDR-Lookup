@@ -98,6 +98,14 @@ possible. Now the two will be merged to a single /23.
 
 =back
 
+=item v0.4
+
+=over 1
+
+=item * Version bump for inclusion of the IPv6 version
+
+=back
+
 =back
 
 =head1 METHODS
@@ -109,7 +117,7 @@ use strict;
 use warnings;
 use Carp;
 
-our $VERSION = sprintf "%d.%d", q$Revision: 0.31$ =~ m/ (\d+) \. (\d+) /xg;
+our $VERSION = sprintf "%d.%d", q$Revision: 0.4$ =~ m/ (\d+) \. (\d+) /xg;
 our $errstr  = undef;
 
 =head2 new
@@ -360,10 +368,6 @@ decision.
 Using a package-global for error reporting was an incredibly stupid idea
 initially. This will change in the next version.
 
-=item *
-
-IPv6 is not supported, which is a shame.
-
 =back
 
 =head1 AUTHORS, COPYRIGHTS & LICENSE
@@ -418,7 +422,7 @@ sub _add {
         return;
     }
     while(1) {
-        $node = pop @$node_stack // last;
+        $node = pop @node_stack // last;
         last unless(defined $$node->[0] and defined $$node->[1] and $$node->[0] eq $$node->[1]);
         $$node = $val;
     }
