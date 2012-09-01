@@ -6,16 +6,20 @@ WriteMakefile(
     NAME                => 'Net::CIDR::Lookup',
     AUTHOR              => 'Matthias Bethke <matthias@towiski.de>',
     VERSION_FROM        => 'lib/Net/CIDR/Lookup.pm',
-	 #ABSTRACT_FROM       => 'lib/Net/CIDR/Lookup.pm',
+	ABSTRACT            => 'Hash-like lookup table based on CIDR blocks',
     ($ExtUtils::MakeMaker::VERSION >= 6.3002
       ? ('LICENSE'=> 'perl')
       : ()),
     PL_FILES            => {},
     PREREQ_PM => {
-        'Test::More' => 0,
-        'Test::Class' => 0,
         'Bit::Vector' => 0,
+        'Socket'      => 1.94,
     },
-    dist                => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
+    BUILD_REQUIRES => {
+        'Test::More'                => 0,
+        'Test::Class'               => 0,
+        'Class::Data::Inheritable'  => 0,
+    },
+    dist                => { COMPRESS => 'bzip2', SUFFIX => 'bz', },
     clean               => { FILES => 'Net-CIDR-Lookup-*' },
 );

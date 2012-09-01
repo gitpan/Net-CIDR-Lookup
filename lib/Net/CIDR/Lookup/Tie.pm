@@ -4,11 +4,11 @@ Net::CIDR::Lookup::Tie
 
 =head1 DESCRIPTION
 
-This is a L<Tie::Hash> interface to L<Net::CIDR::Lookup>, see there for
+This is a L<Tie::Hash|Tie::Hash> interface to L<Net::CIDR::Lookup|Net::CIDR::Lookup>, see there for
 details.
 
 The tied hash accepts net blocks as keys in the same syntax as
-C<Net::CIDR::Lookup->add()> or C<add_range(>) and stores arbitrary (with the
+C<Net::CIDR::Lookup>'s C<add()> or C<add_range()> and stores arbitrary (with the
 exception of C<undef>) scalar values under these. The same coalescing as in
 C<Net::CIDR::Lookup> takes place, so if you add any number of different keys
 you may end up with a hash containing I<less> keys if any mergers took place.
@@ -30,15 +30,9 @@ usually far greater than that of explicitly stored key/value pairs.
 
   foreach(keys %h) { ... }			 # Do anything you'd do with a regular hash
 
-=head1 HISTORY
+=head1 VERSION HISTORY
 
-=over 1
-
-=item v0.3 First CPAN release
-
-=item v0.41 Version bumped to sync with IPv6 version
-
-=back
+See L<Net::CIDR::Lookup::Tie::Changes>
 
 =head1 METHODS
 
@@ -51,7 +45,7 @@ use warnings;
 use Carp;
 use Net::CIDR::Lookup;
 
-$Net::CIDR::Lookup::Tie::VERSION = sprintf "%d.%d", q$Revision: 0.41 $ =~ m/ (\d+) \. (\d+) /xg;
+our $VERSION = '0.5';
 
 sub TIEHASH {   ## no critic (Subroutines::RequireArgUnpacking)
     my $class = shift;
@@ -166,7 +160,7 @@ sub _updkeys {
     if(defined $self->{keys}) {
         keys %{$self->{keys}};                  # Call in void context to reset
     } else {
-        $self->{keys} = $self->{tree}->dump;    # Recreate hash
+        $self->{keys} = $self->{tree}->to_hash; # Recreate hash
     }
 }
 1;

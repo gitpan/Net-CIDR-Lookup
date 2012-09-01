@@ -4,43 +4,35 @@ Net::CIDR::Lookup::IPv6
 
 =head1 DESCRIPTION
 
-This is the IPv6 version of L<Net::CIDR::Lookup>. It generally offers the same methods but with the following differences:
+This is the IPv6 version of L<Net::CIDR::Lookup|Net::CIDR::Lookup>. It generally provides the
+same methods, with the distinction that the C<add_num>/C<add_num_range> methods
+that accept an IPv4 address as an integer have been split in two to accommodate
+different representations for an IPv6 address:
 
 =over 1
 
-=item * The C<add_num>/C<add_num_range> methods that accept an IPv4 address as
-an integer have been split in two:
-
-=over 1
-
-=item * C<add_vec>/C<add_vec_range> accepts a 128-bit L<Bit::Vector> object for an address
+=item * C<add_vec>/C<add_vec_range> accepts a 128-bit L<Bit::Vector|Bit::Vector> object for an address
 
 =item * C<add_str>/C<add_str_range> takes a packed string as returned by C<Socket::unpack_sockaddr_in6>
 
 =back
 
-=item * The API does not use return values and a global C<$errstr> variable to
-signal success or failure but raises an exception (i.e. dies with a message) on
-error.
+For all other methods, see L<Net::CIDR::Lookup|the v4 version>.
 
-=back
+This module requires an IPv6-enabled L<Socket|Socket.pm>. As there is no way to ask for this using ExtUtils::MakeMaker, do make sure you have it.
 
-=head1 HISTORY
+=cut
 
-=over 1
+#=head1 SYNOPSIS
+# TODO flesh this out
+#
+#  use Net::CIDR::Lookup::IPv6;
+#
+#  $cidr = Net::CIDR::Lookup::IPv6->new;
 
-=item v0.4 First CPAN release
+=head1 VERSION HISTORY
 
-=item v0.41 Fixed prerequisite list
-
-=over 1
-
-=item * Fixed prerequisite list
-
-=back
-
-
-=back
+See L<Net::CIDR::Lookup::IPv6::Changes>
 
 =head1 METHODS
 
@@ -54,7 +46,7 @@ use Socket qw/ getaddrinfo unpack_sockaddr_in6 inet_ntop AF_INET6 /;
 use Bit::Vector;
 use parent 'Net::CIDR::Lookup';
 
-our $VERSION = sprintf "%d.%d", q$Revision: 0.41$ =~ m/ (\d+) \. (\d+) /xg;
+our $VERSION = '0.5';
 
 =head2 add
 
@@ -192,8 +184,7 @@ sub lookup {
 
     # Make sure there is no network spec tacked onto $addr
     $addr =~ s!/.*!!;
-	my $ip = _parse_address($addr);
-	$self->_lookup($ip);
+	$self->_lookup(_parse_address($addr));
 }
 
 
@@ -207,7 +198,7 @@ Like C<lookup()> but accepts the address as a Bit::Vector object.
 
 =cut
 
-sub lookup_vec { _lookup($_[0]) }   ## no critic (Subroutines::RequireArgUnpacking)
+sub lookup_vec { _lookup($_[0], $_[1]->Clone) }   ## no critic (Subroutines::RequireArgUnpacking)
 
 =head2 lookup_str
 
@@ -222,7 +213,7 @@ C<Socket::unpack_sockaddr_in6>.
 
 sub lookup_str { _lookup(_str2vec($_[0])) }   ## no critic (Subroutines::RequireArgUnpacking)
 
-=head2 dump
+=head2 to_hash
 
 Arguments: none
 
@@ -233,11 +224,10 @@ addresses.
 
 =cut
 
-sub dump {  ## no critic (Subroutines::ProhibitBuiltinHomonyms)
+sub to_hash {
 	my ($self) = @_;
 	my %result;
 	$self->_walk(Bit::Vector->new(128), 0, sub {
-            my ($addr, $bits, $val) = @_;
             my $net = _addr2print($_[0]) . '/' . $_[1];
             if(defined $result{$net}) {
                 confess "internal error: network $net mapped to $result{$net} already!";
@@ -304,7 +294,7 @@ Licensed unter the Artistic License 2.0
 
 =head1 SEE ALSO
 
-This module's methods are based even more loosely than those of L<Net::CIDR::Lookup> on those of L<Net::CIDR::Lite>
+This module's methods are based even more loosely on L<Net::CIDR::Lite|Net::CIDR::Lite> than those of L<Net::CIDR::Lookup|Net::CIDR::Lookup>.
 
 =cut
 
@@ -372,11 +362,15 @@ sub _add_check_subtree {
 
 sub _lookup {
 	my ($node, $addr) = @_;
+    my $bit;
+    #printf "_lookup($node, %s)\n", $addr->to_Hex;
 
-    my $bit = $addr->shift_left(0);
-	defined $node->[$bit] or return;
-	__PACKAGE__ ne ref $node->[$bit] and return $node->[$bit];
-	_lookup($node->[$bit], $addr);
+    while(1) {
+        $bit = $addr->shift_left(0);
+        defined $node->[$bit] or return;
+        __PACKAGE__ ne ref $node->[$bit] and return $node->[$bit];
+        $node = $node->[$bit];
+    }
 }
 
 # Convert a packed IPv6 address to a Bit::Vector object
@@ -402,63 +396,85 @@ sub _addr2print { inet_ntop(AF_INET6, pack('N4', reverse $_[0]->Chunk_List_Read(
 # Walk the tree in depth-first LTR order
 sub _walk {
 	my ($node, $addr, $bits, $cb) = @_;
-	my ($a, $b) = @$node;
+	my ($l, $r);
+    my @node_stack = ($bits, $node);
+    #print "================== WALK ==================: ", join(':',caller),"\n"; 
+    while(defined($node = pop @node_stack)) {
+        $bits    = pop @node_stack;
+        #print "LOOP: stack size ".@node_stack."\n";
+        if(__PACKAGE__ eq ref $node) {
+            ($l, $r) = @$node;
+            #printf "Popped l=%s r=%s, bits=%d\n", ($l//'<undef>'), ($r//'<undef>'), $bits;
+            ++$bits;
 
-	++$bits;
-    # Check left side
-	if(__PACKAGE__ eq ref $a) {
-		$a->_walk($addr, $bits, $cb);
-	} else {
-		defined $a and $cb->($addr, $bits, $a);
-	}
-    # Check right side
-    $addr->Bit_On(128 - $bits);
-	if(__PACKAGE__ eq ref $b) {
-		$b->_walk($addr, $bits, $cb);
-	} else {
-		defined $b and $cb->($addr, $bits, $b);
-	}
+            # Check left side
+            $addr->Bit_Off(128 - $bits);
+            if(__PACKAGE__ eq ref $l) {
+                #print "L: pushing node=$l, bits=$bits\n";
+                defined $r and push @node_stack, ($bits, $r);
+                push @node_stack, ($bits, $l);
+                #printf "L: addr=%032b (%s)\n", $addr, _int2dq($addr);
+                next; # Short-circuit back to loop w/o checking $r!
+            } else {
+                #defined $l and printf "L: CALLBACK (%s/%d) => %s\n", _int2dq($addr), $bits, $l;
+                defined $l and $cb->($addr, $bits, $l);
+            }
+        } else {
+            # There was a right-side leaf node on the stack that will end up in
+            # the "else" branch below
+            #print "Found leftover right leaf $node\n";
+            $r = $node;
+        }
+
+        # Check right side
+        $addr->Bit_On(128 - $bits);
+        if(__PACKAGE__ eq ref $r) {
+            #print "R: pushing node=$r, bits=$bits\n";
+            push @node_stack, ($bits, $r);
+            #printf "R: addr=%032b (%s)\n", $addr, _addr2print($addr);
+        } else {
+            #defined $r and printf "R: CALLBACK (%s/%d) => %s\n", _addr2prin($addr | 1 << 32-$bits), $bits, $r;
+            defined $r and $cb->($addr, $bits, $r);
+        }
+    }
 }
 
 # Split a chunk into a minimal number of CIDR blocks.
 sub _do_chunk {
     my ($chunks, $start, $end, $ix1, $ix2) = @_;
-    my ($xor, $lowbits, $prefix, $tmp_prefix) = Bit::Vector->new(128, 4);
+    my ($xor, $prefix, $tmp_prefix) = Bit::Vector->new(128, 3);
 
     # Find common prefix.  After that, the bit indicated by $ix1 is 0 for $start
     # and 1 for $end. A split a this point guarantees the longest suffix.
     $xor->Xor($start, $end);
-    #print "--------------------------------------------------------------------------------\n";
-    #print "Start : ",$start->to_Hex,"\n";
-    #print "End   : ",$end->to_Hex,"\n";
-    #print "XOR   : ",$xor->to_Hex,"\n";
-    --$ix1 until($xor->bit_test($ix1) or -1 == $ix1);
-    $prefix->Interval_Fill($ix1, 127);
+    #print STDERR "--------------------------------------------------------------------------------\n";
+    #print STDERR "Start : ",$start->to_Hex,"\n";
+    #print STDERR "End   : ",$end->to_Hex,"\n";
+    #print STDERR "XOR   : ",$xor->to_Hex,"\n";
+    --$ix1 until(-1 == $ix1 or $xor->bit_test($ix1));
+    $prefix->Interval_Fill($ix1+1, 127);
     $prefix->And($prefix, $start);
 
     $ix2++ while($ix2 <= $ix1
             and not $start->bit_test($ix2)
             and $end->bit_test($ix2));
 
-    #print "After loop: ix1=$ix1, ix2=$ix2, ";
-    #print "Prefix: ",$prefix->to_Hex,"\n";
+    #print STDERR "After loop: ix1=$ix1, ix2=$ix2, ";
+    #print STDERR "Prefix: ",$prefix->to_Hex,"\n";
 
-    # Split if $fbits and $lbits disagree on the length of the chunk.
     if ($ix2 <= $ix1) {
-        #print "splitting\n";
-        #print "Recursing with $ix1 lowbits=1 in end\n";
+        #print STDERR "Recursing with $ix1 lowbits=1 in end\n";
         $tmp_prefix->Copy($prefix);
         $tmp_prefix->Interval_Fill(0, $ix1-1);
         _do_chunk($chunks, $start, $tmp_prefix, $ix1, $ix2);
 
-        #print "Recursing with $ix1 lowbits=0 in start\n";
+        #print STDERR "Recursing with $ix1 lowbits=0 in start\n";
         $tmp_prefix->Copy($prefix);
         $tmp_prefix->Bit_On($ix1);
         _do_chunk($chunks, $tmp_prefix, $end, $ix1, $ix2);
     } else {
-        #print "not splitting\n";
         push @$chunks, [ $prefix, 127-$ix1 ];
-        #printf "Result: %s/%d\n", $chunks->[-1][0]->to_Hex, $chunks->[-1][1];
+        #printf STDERR "Result: %s/%d\n", $chunks->[-1][0]->to_Hex, $chunks->[-1][1];
     }
 }
 
