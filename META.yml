@@ -22,4 +22,5 @@ no_index:
 requires:
   Bit::Vector: 0
   Socket: 1.94
-version: 0.5
+  parent: 0
+version: 0.51

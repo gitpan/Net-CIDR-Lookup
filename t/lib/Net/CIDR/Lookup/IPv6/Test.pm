@@ -5,6 +5,8 @@ use warnings;
 use parent 'My::Test::Class';
 use Test::More;
 use Test::Exception;
+use Bit::Vector;
+use Socket qw/ getaddrinfo unpack_sockaddr_in6 inet_ntop AF_INET6 /;
 
 #-------------------------------------------------------------------------------
 
@@ -49,6 +51,36 @@ sub add_range : Tests(4) {
     is($t->lookup('f::'), undef, 'No result outside blocks');
     my $h = $t->to_hash;
     is(scalar keys %$h, 39, 'Range expansion: number of keys');
+}
+
+sub lookups : Tests(6) {
+    my $t = shift->{tree};
+    $t->add_range('2001:db8::-2003:db8::abc', 42);
+    $t->add_range('1::1234 - 1::1:2345', 23);
+    
+    for([ '2002:cb8::abc' => 42 ],
+        [ '1::ffff'       => 23 ],
+        [ 'f::'           => undef ]
+    ) {
+        my ($err, @result) = getaddrinfo($_->[0], 0);
+
+        my $str = (unpack_sockaddr_in6($result[0]{addr}))[1];
+        my $vec = Bit::Vector->new(128);
+        $vec->Chunk_List_Store(32, reverse unpack 'N4', $str);
+
+        is($t->lookup_str($str), $_->[1], "lookup_str($_->[0]) OK");
+        is($t->lookup_vec($vec), $_->[1], "lookup_vec($_->[0]) OK");
+    }
+}
+
+sub to_hash : Tests(3) {
+    my $t = shift->{tree};
+    $t->add_range('7::31.201.1.36-7::31.201.1.39',   1); # 31.201.1.36/30
+    $t->add_range('8::32.105.59.0-8::32.105.59.255', 1); # 32.105.59.0/24
+    my $h = $t->to_hash;
+    ok((defined $h->{'7::1fc9:124/126'} and defined $h->{'8::2069:3b24/120'}), 'to_hash(): correct keys');
+    ok((1 == $h->{'7::1fc9:124/126'} and 1 == $h->{'8::2069:3b24/120'}), 'to_hash(): correct values');
+    ok(2 == keys %$h, 'to_hash(): no spurious keys');
 }
 
 1;

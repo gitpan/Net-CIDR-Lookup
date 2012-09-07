@@ -5,7 +5,7 @@ use warnings;
 use parent 'My::Test::Class';
 use Test::More;
 use Test::Exception;
-
+use Socket qw/ inet_aton /;
 #-------------------------------------------------------------------------------
 
 sub check_methods : Test(startup => 8) {
@@ -34,6 +34,14 @@ sub add : Tests(3) {
     is($t->lookup('192.168.0.161'), 42, 'Block 192.168.0.129/25 lookup OK');
     is($t->lookup('1.3.123.234'), 23, 'Block 1.2.0.0/15 lookup OK');
     is($t->lookup('2.3.4.5'), undef, 'No result outside blocks');
+}
+
+sub lookup_num : Tests(2) {
+    my $t = shift->{tree};
+    $t->add('192.168.0.129/25', 42);
+    $t->add('1.2.0.0/15', 23);
+    is($t->lookup_num(_dq2int('192.168.0.130')), 42, 'lookup_num() found in range');
+    is($t->lookup_num(_dq2int('192.188.0.1')), undef, 'lookup_num() not found outside');
 }
 
 sub add_range : Tests(4) {
@@ -133,12 +141,25 @@ sub superrange2 : Tests(2) {
     is($h->{'192.168.160.0/20'}, 1, 'Big superrange: got correct block');
 }
 
+sub to_hash : Tests(3) {
+    my $t = shift->{tree};
+    $t->add_range('31.201.1.36-31.201.1.39',   1); # 31.201.1.36/30
+    $t->add_range('32.105.59.0-32.105.59.255', 1); # 32.105.59.0/24
+    my $h = $t->to_hash;
+    ok((defined $h->{'31.201.1.36/30'} and defined $h->{'32.105.59.0/24'}), 'to_hash(): correct keys');
+    ok((1 == $h->{'31.201.1.36/30'} and 1 == $h->{'32.105.59.0/24'}), 'to_hash(): correct values');
+    ok(2 == keys %$h, 'to_hash(): no spurious keys');
+}
+
 sub clear : Tests(1) {
     my $t = shift->{tree};
     $t->add('192.168.0.129/25', 42);
     $t->clear;
     is(scalar keys %{$t->to_hash}, 0, 'Reinitialized tree');
 }
+
+#-------------------------------------------------------------------------------
+sub _dq2int { unpack "N", inet_aton($_[0]) }
 
 1;
 

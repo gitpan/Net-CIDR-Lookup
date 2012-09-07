@@ -26,14 +26,15 @@ Since V0.5, errors are signalled by an exception so method calls should generall
   use Net::CIDR::Lookup;
 
   $cidr = Net::CIDR::Lookup->new;
-  $cidr->add("192.168.42.0/24",1);    # Add first network, value 1
-  $cidr->add_num(167772448,27,2);     # 10.0.1.32/27 => 2
-  $cidr->add("192.168.43.0/24",1);    # Automatic coalescing to a /23
-  $cidr->add("192.168.41.0/24",2);    # Stays separate due to different value
-  $cidr->add("192.168.42.128/25",2);  # Error: overlaps with different value
+  $cidr->add("192.168.42.0/24",1);     # Add first network, value 1
+  $cidr->add_num(167772448,27,2);      # 10.0.1.32/27 => 2
+  $cidr->add("192.168.43.0/24",1);     # Automatic coalescing to a /23
+  $cidr->add("192.168.41.0/24",2);     # Stays separate due to different value
+  $cidr->add("192.168.42.128/25",2);   # Error: overlaps with different value
 
-  $h = $cidr->to_hash;                   # Convert tree to a hash
+  $val = $h->lookup("192.168.41.123"); # => 2
 
+  $h = $cidr->to_hash;                 # Convert tree to a hash
   print "$k => $v\n" while(($k,$v) = each %$h);
 
   # Output (order may vary):
@@ -53,7 +54,8 @@ Since V0.5, errors are signalled by an exception so method calls should generall
   # 192.168.42.0/23 => 1
 
   $cidr->clear;                                 # Remove all entries
-  $cidr->add_range('1.2.3.11 - 1.2.4.234', 42); # Add a range of addresses, automatically split into CIDR blocks
+  $cidr->add_range('1.2.3.11 - 1.2.4.234', 42); # Add a range of addresses,
+                                                # automatically split into CIDR blocks
   $h = $cidr->to_hash;
   print "$k => $v\n" while(($k,$v) = each %$h);
 
@@ -82,9 +84,11 @@ See L<Net::CIDR::Lookup::Changes>
 package Net::CIDR::Lookup;
 use strict;
 use warnings;
+use integer;
 use Carp;
+use Socket qw/ inet_ntop inet_pton AF_INET /;
 
-our $VERSION = '0.5';
+our $VERSION = '0.51';
 
 =head2 new
 
@@ -216,7 +220,7 @@ Like C<lookup()> but accepts the address in integer form.
 
 =cut
 
-sub lookup_num { _lookup($_[0]) } ## no critic (Subroutines::RequireArgUnpacking)
+sub lookup_num { shift->_lookup($_[0]) } ## no critic (Subroutines::RequireArgUnpacking)
 
 =head2 to_hash
 
@@ -241,7 +245,7 @@ sub to_hash {
             }
         }
     );
-	\%result;
+	return \%result;
 }
 
 =head2 walk
@@ -392,21 +396,11 @@ sub _lookup {
     }
 }
 
-# Dotted-quad to integer
-sub _dq2int { ## no critic (Subroutines::RequireArgUnpacking)
-	my @oct = split /\./, $_[0];
-	4 == @oct or croak "address must be in dotted-quad form, is `$_[0]'";
-	my $ip = 0;
-    foreach(@oct) {
-        $_ <= 255 and $_ >= 0
-            or croak "invalid component `$_' in address `$_[0]'";
-        $ip = $ip<<8 | $_;
-    }
-	return $ip;
-}
+# IPv4 address from dotted-quad to integer
+sub _dq2int { unpack 'N', inet_pton(AF_INET, shift) }
 
-# Convert an IP address in integer format to dotted-quad
-sub _int2dq { join '.', unpack 'C*', pack 'N', shift }
+# IPv4 address from integer to dotted-quad
+sub _int2dq { inet_ntop(AF_INET, pack 'N', shift) }
 
 # Convert a CIDR block ($addr, $bits) into a range of addresses ($lo, $hi)
 # sub _cidr2rng { ( $_[0], $_[0] | ((1 << $_[1]) - 1) ) }
@@ -415,21 +409,26 @@ sub _int2dq { join '.', unpack 'C*', pack 'N', shift }
 sub _walk {
 	my ($node, $addr, $bits, $cb) = @_;
 	my ($l, $r);
-    my @node_stack = ($bits, $node);
+    my @node_stack = ($node, $addr, $bits);
     #print "================== WALK ==================: ", join(':',caller),"\n"; 
-    while(defined($node = pop @node_stack)) {
-        $bits    = pop @node_stack;
-        #print "LOOP: stack size ".@node_stack."\n";
+    while(@node_stack) {
+        ($node, $addr, $bits) = splice @node_stack, -3; # pop 3 elems
+        #print "LOOP: stack size ".(@node_stack/3)."\n";
         if(__PACKAGE__ eq ref $node) {
             ($l, $r) = @$node;
-            #printf "Popped l=%s r=%s, bits=%d\n", ($l//'<undef>'), ($r//'<undef>'), $bits;
+            #printf "Popped [%s, %s]:%s/%d\n",
+            #    ($l//'') =~ /^Net::CIDR::Lookup=/ ? '<node>' : $l//'<undef>',
+            #    ($r//'') =~ /^Net::CIDR::Lookup=/ ? '<node>' : $r//'<undef>',
+            #    _int2dq($addr), $bits;
             ++$bits;
 
             # Check left side
+            #$addr &= ~(1 << 31-$bits);
             if(__PACKAGE__ eq ref $l) {
-                #print "L: pushing node=$l, bits=$bits\n";
-                defined $r and push @node_stack, ($bits, $r);
-                push @node_stack, ($bits, $l);
+                #defined $r and print "L: pushing right node=$r, bits=$bits\n";
+                defined $r and push @node_stack, ($r, $addr | 1 << 32-$bits, $bits);
+                #print "L: pushing left  node=$l, bits=$bits\n";
+                push @node_stack, ($l, $addr, $bits);
                 #printf "L: addr=%032b (%s)\n", $addr, _int2dq($addr);
                 next; # Short-circuit back to loop w/o checking $r!
             } else {
@@ -444,14 +443,14 @@ sub _walk {
         }
 
         # Check right side
+        $addr |= 1 << 32-$bits;
         if(__PACKAGE__ eq ref $r) {
-            #print "R: pushing node=$r, bits=$bits\n";
-            push @node_stack, ($bits, $r);
-            $addr |= 1 << 32-$bits;
+            #print "R: pushing right node=$r, bits=$bits\n";
+            push @node_stack, ($r, $addr, $bits);
             #printf "R: addr=%032b (%s)\n", $addr, _int2dq($addr);
         } else {
-            #defined $r and printf "R: CALLBACK (%s/%d) => %s\n", _int2dq($addr | 1 << 32-$bits), $bits, $r;
-            defined $r and $cb->($addr | 1 << 32-$bits, $bits, $r);
+            #defined $r and printf "R: CALLBACK (%s/%d) => %s\n", _int2dq($addr), $bits, $r;
+            defined $r and $cb->($addr, $bits, $r);
         }
     }
 }
