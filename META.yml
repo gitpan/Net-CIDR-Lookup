@@ -23,4 +23,5 @@ requires:
   Bit::Vector: 0
   Socket: 1.94
   parent: 0
+  perl: 5.010001
 version: 0.51

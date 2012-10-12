@@ -83,7 +83,7 @@ See L<Net::CIDR::Lookup::Changes>
 
 package Net::CIDR::Lookup;
 use strict;
-use warnings;
+use 5.010001;
 use integer;
 use Carp;
 use Socket qw/ inet_ntop inet_pton AF_INET /;
