@@ -4,7 +4,7 @@
       "Matthias Bethke <matthias@towiski.de>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.62, CPAN::Meta::Converter version 2.112621",
+   "generated_by" : "ExtUtils::MakeMaker version 6.74, CPAN::Meta::Converter version 2.120921",
    "license" : [
       "perl_5"
    ],
@@ -22,21 +22,21 @@
    "prereqs" : {
       "build" : {
          "requires" : {
-            "Class::Data::Inheritable" : 0,
-            "Test::Class" : 0,
-            "Test::More" : 0
+            "Class::Data::Inheritable" : "0",
+            "Test::Class" : "0",
+            "Test::More" : "0"
          }
       },
       "configure" : {
          "requires" : {
-            "ExtUtils::MakeMaker" : 0
+            "ExtUtils::MakeMaker" : "0"
          }
       },
       "runtime" : {
          "requires" : {
-            "Bit::Vector" : 0,
+            "Bit::Vector" : "0",
             "Socket" : "1.94",
-            "parent" : 0,
+            "parent" : "0",
             "perl" : "5.010001"
          }
       }
