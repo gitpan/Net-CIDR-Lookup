@@ -30,6 +30,16 @@ sub before : Test(setup) {
 
 sub add : Tests(3) {
     my $t = shift->{tree};
+    # First check that add() does not die.  If so, we're out of luck anyway
+    # and can only try to log as much information as possible.
+    eval { $t->add('192.168.0.129/25', 42); };
+    if($@) {
+        print STDERR "add() dies on `$^O' :(\n";
+        no warnings 'redefine';
+        *Net::CIDR::Lookup::_add = \&_add;
+        $t->add('192.168.0.129/25', 42);
+        die;
+    }
     $t->add('192.168.0.129/25', 42);
     $t->add('1.2.0.0/15', 23);
     is($t->lookup('192.168.0.161'), 42, 'Block 192.168.0.129/25 lookup OK');
@@ -171,6 +181,52 @@ sub _dq2int { ## no critic (Subroutines::RequireArgUnpacking)
         $ip = $ip<<8 | $_;
     }
     return $ip;
+}
+
+# Debugging version to be monkey-patched in in case of sudden death
+sub _add {
+	my ($node, $addr, $nbits, $val) = @_;
+    my ($bit, $checksub);
+    my @node_stack;
+    print STDERR "Called _add($node, $addr, $nbits, $val)\n";
+    DESCEND:
+    while(1) {
+	    $bit = ($addr & 0x80000000) >> 31;
+        $addr <<= 1;
+        print STDERR "After mask/shift: bit=$bit, addr=$addr nbits=$nbits\n";
+
+        if('Net::CIDR::Lookup' ne ref $node) {
+            return 1 if($val eq $node); # Compatible entry (tried to add a subnet of one already in the tree)
+            croak "incompatible entry, found `$node' trying to add `$val'";
+        }
+        last DESCEND unless --$nbits;
+        if(defined $node->[$bit]) {
+            $checksub = 1;
+        } else {
+            $node->[$bit] ||= bless([], 'Net::CIDR::Lookup');
+            $checksub = 0;
+        }
+        push @node_stack, \$node->[$bit];
+        $node = $node->[$bit];
+    }
+    
+    $checksub
+        and defined $node->[$bit]
+        and 'Net::CIDR::Lookup' eq ref $node->[$bit]
+        and _add_check_subtree($node->[$bit], $val);
+
+    $node->[$bit] = $val;
+
+    # Take care of potential mergers into the previous node (if $node[0] == $node[1])
+    not @node_stack
+        and defined $node->[$bit ^ 1]
+        and $node->[$bit ^ 1] eq $val
+        and croak 'merging two /1 blocks is not supported yet';
+    while(1) {
+        $node = pop @node_stack // last;
+        last unless(defined $$node->[0] and defined $$node->[1] and $$node->[0] eq $$node->[1]);
+        $$node = $val;
+    }
 }
 
 1;
