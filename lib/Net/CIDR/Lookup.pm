@@ -348,7 +348,7 @@ sub _add {
 
     DESCEND:
     while(1) {
-	    $bit = ($addr & 0x80000000) >> 31;
+	    $bit = (($addr & 0x8000_0000) >> 31) & 0x1;
         $addr <<= 1;
 
         if(__PACKAGE__ ne ref $node) {
